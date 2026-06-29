@@ -80,3 +80,50 @@ export async function awardXP(userId: string, xpEarned: number, reason: string) 
     })
   })
 }
+
+export async function deductXP(userId: string, xpDeducted: number, reason: string) {
+  if (xpDeducted <= 0) return
+
+  const progressRef = adminDb.collection("user_progress").doc(userId)
+  const xpLogRef = adminDb.collection("xp_log").doc()
+
+  await adminDb.runTransaction(async (transaction) => {
+    const progressDoc = await transaction.get(progressRef)
+    if (!progressDoc.exists) return
+
+    const currentData = progressDoc.data() || {}
+    const currentXp = currentData.xp_total !== undefined ? currentData.xp_total : (currentData.xpTotal || 0)
+    const newXp = Math.max(0, currentXp - xpDeducted)
+
+    // 1000 XP per level
+    const newLevel = Math.floor(newXp / 1000) + 1
+
+    let newLevelTitle = "Rookie"
+    if (newLevel >= 5) newLevelTitle = "Closer Elite"
+    else if (newLevel >= 4) newLevelTitle = "Sales Master"
+    else if (newLevel >= 3) newLevelTitle = "Objection Crusher"
+    else if (newLevel >= 2) newLevelTitle = "Negotiator"
+
+    const updates = {
+      xp_total: newXp,
+      xpTotal: newXp,
+      level: newLevel,
+      level_title: newLevelTitle,
+      levelTitle: newLevelTitle,
+      updated_at: new Date().toISOString(),
+      updatedAt: FieldValue.serverTimestamp()
+    }
+
+    transaction.update(progressRef, updates)
+
+    // Log the XP transaction as a negative value
+    transaction.set(xpLogRef, {
+      userId,
+      xpEarned: -xpDeducted,
+      reason,
+      createdAt: FieldValue.serverTimestamp(),
+      created_at: new Date().toISOString()
+    })
+  })
+}
+

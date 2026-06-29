@@ -236,8 +236,9 @@ export default function DashboardShell({ children }: { children: React.ReactNode
     )
   }
   const isQuizActive = pathname.startsWith("/dashboard/quiz/") && pathname.split("/").length === 4
+  const isPracticeChat = /^\/dashboard\/practice\/[^/]+$/.test(pathname)
 
-  if (isQuizActive) {
+  if (isQuizActive || isPracticeChat) {
     return (
       <div className="min-h-screen bg-[#080810] text-[#F2F2F7]">
         {children}
