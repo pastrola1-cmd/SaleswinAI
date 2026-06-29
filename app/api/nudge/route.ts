@@ -2,6 +2,7 @@ import { adminAuth, adminDb } from "@/utils/firebase/admin"
 import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 import { Resend } from "resend"
+import { createNotification } from "@/lib/notifications"
 
 export async function POST(request: Request) {
   // Get current user session from HTTP-only cookie
@@ -49,14 +50,13 @@ export async function POST(request: Request) {
     }
 
     // 3. Create real-time notification doc in Firestore subcollection notifications/{userId}/items
-    const notifRef = adminDb.collection("notifications").doc(userId).collection("items").doc()
-    await notifRef.set({
-      title: "Training Reminder",
-      message: `${manager.full_name || "Your Manager"} sent you a reminder to complete your practice sessions today.`,
-      isRead: false,
-      createdAt: new Date().toISOString(),
-      created_at: new Date().toISOString()
-    })
+    await createNotification(
+      userId,
+      "manager_nudge",
+      "Training Reminder",
+      `${manager.full_name || "Your Manager"} sent you a reminder to complete your practice sessions today.`,
+      "/dashboard/practice"
+    )
 
     // 4. Send email via Resend
     const resendApiKey = process.env.RESEND_API_KEY

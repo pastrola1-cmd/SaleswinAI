@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
 import { useProfile } from "@/hooks/useProfile"
 import { auth, db } from "@/utils/firebase/client"
-import { collection, query, where, onSnapshot, getDocs, writeBatch } from "firebase/firestore"
+import { collection, query, where, onSnapshot, getDocs, writeBatch, orderBy, limit, doc } from "firebase/firestore"
 
 interface NavItem {
   name: string
@@ -161,17 +161,25 @@ export default function DashboardShell({ children }: { children: React.ReactNode
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false)
   const [unreadNotifications, setUnreadNotifications] = useState(0)
+  const [notifications, setNotifications] = useState<any[]>([])
+  const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false)
 
   useEffect(() => {
     if (!profile?.id) return
 
     const q = query(
       collection(db, "notifications", profile.id, "items"),
-      where("isRead", "==", false)
+      orderBy("createdAt", "desc"),
+      limit(20)
     )
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setUnreadNotifications(snapshot.size)
+      const items = snapshot.docs.map(docSnap => ({
+        id: docSnap.id,
+        ...docSnap.data()
+      }))
+      setNotifications(items)
+      setUnreadNotifications(items.filter((item: any) => !item.isRead).length)
     }, (err) => {
       console.error("Notifications listener error:", err)
     })
@@ -179,21 +187,39 @@ export default function DashboardShell({ children }: { children: React.ReactNode
     return () => unsubscribe()
   }, [profile?.id])
 
-  const handleClearNotifications = async () => {
-    if (!profile?.id || unreadNotifications === 0) return
+  const handleMarkAllAsRead = async () => {
+    if (!profile?.id) return
     try {
-      const q = query(
-        collection(db, "notifications", profile.id, "items"),
-        where("isRead", "==", false)
-      )
-      const querySnapshot = await getDocs(q)
       const batch = writeBatch(db)
-      querySnapshot.forEach(docSnap => {
-        batch.update(docSnap.ref, { isRead: true })
+      notifications.forEach(item => {
+        if (!item.isRead) {
+          const docRef = doc(db, "notifications", profile.id, "items", item.id)
+          batch.update(docRef, { isRead: true })
+        }
       })
       await batch.commit()
     } catch (e) {
-      console.error("Failed to clear notifications:", e)
+      console.error("Failed to mark all as read:", e)
+    }
+  }
+
+  const handleNotifClick = async (notif: any) => {
+    setIsNotifDropdownOpen(false)
+    if (!profile?.id) return
+    
+    if (!notif.isRead) {
+      try {
+        const batch = writeBatch(db)
+        const docRef = doc(db, "notifications", profile.id, "items", notif.id)
+        batch.update(docRef, { isRead: true })
+        await batch.commit()
+      } catch (e) {
+        console.error("Failed to mark notification as read:", e)
+      }
+    }
+
+    if (notif.actionUrl) {
+      router.push(notif.actionUrl)
     }
   }
   const handleLogout = async () => {
@@ -412,18 +438,91 @@ export default function DashboardShell({ children }: { children: React.ReactNode
             )}
             
             {/* Notification Bell */}
-            <div 
-              onClick={handleClearNotifications}
-              className="relative cursor-pointer hover:opacity-80 transition-opacity"
-            >
-              <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-              </svg>
-              {/* Unread badge */}
-              {unreadNotifications > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-[#00D68F] text-[#080810] text-[9px] font-bold rounded-full flex items-center justify-center animate-pulse">
-                  {unreadNotifications}
-                </span>
+            <div className="relative">
+              <button 
+                onClick={() => setIsNotifDropdownOpen(!isNotifDropdownOpen)}
+                className="relative p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors focus:outline-none"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                </svg>
+                {/* Unread badge */}
+                {unreadNotifications > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-[#00D68F] text-[#080810] text-[8px] font-black rounded-full flex items-center justify-center animate-pulse">
+                    {unreadNotifications}
+                  </span>
+                )}
+              </button>
+
+              {/* Dropdown Panel */}
+              {isNotifDropdownOpen && (
+                <>
+                  {/* Backdrop toggle closer */}
+                  <div className="fixed inset-0 z-40" onClick={() => setIsNotifDropdownOpen(false)} />
+                  
+                  <div className="absolute right-0 mt-3 w-80 rounded-2xl bg-[#121225] border border-gray-800 shadow-2xl z-50 overflow-hidden text-xs animate-in fade-in slide-in-from-top-2 duration-150">
+                    <div className="p-4 border-b border-gray-850 flex justify-between items-center bg-[#1C1C35]/50">
+                      <span className="font-display font-black text-white uppercase tracking-wider">Notifications</span>
+                      {unreadNotifications > 0 && (
+                        <button
+                          onClick={handleMarkAllAsRead}
+                          className="text-[#00D68F] hover:underline font-bold text-[10px] uppercase tracking-wider"
+                        >
+                          Mark all as read
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="max-h-64 overflow-y-auto divide-y divide-gray-850">
+                      {notifications.length > 0 ? (
+                        notifications.map((notif) => {
+                          const dateStr = notif.createdAt 
+                            ? (notif.createdAt.toDate ? notif.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : new Date(notif.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
+                            : ""
+
+                          return (
+                            <div
+                              key={notif.id}
+                              onClick={() => handleNotifClick(notif)}
+                              className={`p-3.5 flex items-start space-x-3 cursor-pointer transition-colors hover:bg-white/2 ${
+                                !notif.isRead 
+                                  ? "border-l-[3px] border-[#00D68F] bg-[#00D68F]/3" 
+                                  : ""
+                              }`}
+                            >
+                              <span className="text-base select-none shrink-0">{notif.icon || "🔔"}</span>
+                              <div className="space-y-1 flex-1">
+                                <p className={`text-white leading-tight ${!notif.isRead ? "font-bold" : "font-medium"}`}>
+                                  {notif.title}
+                                </p>
+                                <p className="text-gray-400 leading-normal text-[11px]">
+                                  {notif.body}
+                                </p>
+                                <span className="text-[9px] text-gray-500 font-mono block">
+                                  {dateStr}
+                                </span>
+                              </div>
+                            </div>
+                          )
+                        })
+                      ) : (
+                        <div className="p-8 text-center text-gray-500 font-medium">
+                          No notifications yet.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="p-3 border-t border-gray-850 text-center bg-[#121225]/80">
+                      <Link
+                        href="/dashboard/notifications"
+                        onClick={() => setIsNotifDropdownOpen(false)}
+                        className="text-[#00D68F] hover:underline font-bold text-[10px] uppercase tracking-wider block"
+                      >
+                        View all alerts
+                      </Link>
+                    </div>
+                  </div>
+                </>
               )}
             </div>
           </div>

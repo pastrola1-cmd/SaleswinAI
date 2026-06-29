@@ -3,6 +3,7 @@ import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 import { awardXP } from "@/lib/xp"
 import { FieldValue } from "firebase-admin/firestore"
+import { createNotification } from "@/lib/notifications"
 
 interface SimulationDebrief {
   overall_score: number
@@ -247,6 +248,15 @@ Provide your complete evaluation and return ONLY a valid JSON object matching th
     if (debrief.xp_earned > 0) {
       await awardXP(uid, debrief.xp_earned, `Completed Sales Simulation with ${personaName}`)
     }
+
+    // 8. Create simulation completion notification
+    await createNotification(
+      uid,
+      "xp_earned",
+      "Session Complete",
+      `You scored ${debrief.overall_score}/100 in your sales simulation with ${personaName}.`,
+      `/dashboard/practice/${sessionId}/debrief`
+    )
 
     return NextResponse.json({
       success: true,

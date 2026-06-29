@@ -2,6 +2,7 @@ import { adminAuth, adminDb } from "@/utils/firebase/admin"
 import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 import { FieldValue } from "firebase-admin/firestore"
+import { createNotification } from "@/lib/notifications"
 
 const PLAN_PRICING: Record<string, { price: number; label: string }> = {
   pro:     { price: 990000,   label: "Pro" },
@@ -72,6 +73,15 @@ export async function POST(request: Request) {
         createdAt: FieldValue.serverTimestamp()
       })
 
+      // Trigger notification
+      await createNotification(
+        uid,
+        "billing",
+        "Payment received",
+        `Workspace successfully upgraded to ${targetPlan.toUpperCase()} plan!`,
+        "/dashboard/billing"
+      )
+
       return NextResponse.json({ success: true, mock: true })
     }
 
@@ -132,6 +142,15 @@ export async function POST(request: Request) {
       periodEnd: endPeriod.toISOString(),
       createdAt: FieldValue.serverTimestamp()
     })
+
+    // Trigger notification
+    await createNotification(
+      uid,
+      "billing",
+      "Payment received",
+      `Workspace successfully upgraded to ${companyPlan.toUpperCase()} plan!`,
+      "/dashboard/billing"
+    )
 
     return NextResponse.json({ success: true })
 

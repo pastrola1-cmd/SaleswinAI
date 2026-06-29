@@ -1,5 +1,6 @@
 import { adminDb } from "@/utils/firebase/admin"
 import { FieldValue } from "firebase-admin/firestore"
+import { createNotification } from "./notifications"
 
 export const XP_REWARDS = {
   simulation_complete: 200,
@@ -232,6 +233,29 @@ export async function awardXP(
     }
   })
 
+  // Trigger Level Up Notification
+  if (result.leveledUp) {
+    const levelTitle = LEVELS.find((l) => l.level === result.newLevel)?.title || "Converter"
+    await createNotification(
+      userId,
+      "level_up",
+      "Level Up!",
+      `Congratulations! You've reached Level ${result.newLevel} — ${levelTitle}!`,
+      "/dashboard/progress"
+    )
+  }
+
+  // Trigger Badge Earned Notifications
+  for (const b of result.newBadges) {
+    await createNotification(
+      userId,
+      "badge_earned",
+      "New Badge Unlocked",
+      `${b.icon} You earned the "${b.name}" badge!`,
+      "/dashboard/progress"
+    )
+  }
+
   return result
 }
 
@@ -301,6 +325,16 @@ export async function checkStreak(userId: string): Promise<any> {
     }
 
     await awardXP(userId, amount, reason, "login")
+  }
+
+  if (responseData.streakUpdated) {
+    await createNotification(
+      userId,
+      "streak_reminder",
+      "Closing Streak Active!",
+      `🔥 You have started or maintained a ${responseData.newStreak}-day active practice streak! Keep it up!`,
+      "/dashboard/progress"
+    )
   }
 
   return responseData

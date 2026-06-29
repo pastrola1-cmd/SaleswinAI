@@ -36,16 +36,30 @@ export default function PracticeSessionPage() {
   const [hintError, setHintError] = useState<string | null>(null)
   const [ending, setEnding] = useState(false)
 
-  // Voice Call specific states
+  // Voice Call / Speech specific states
   const [isMuted, setIsMuted] = useState(false)
   const [isListening, setIsListening] = useState(false)
   const [callDuration, setCallDuration] = useState(0)
   const [showTranscript, setShowTranscript] = useState(false)
+  const [micPermission, setMicPermission] = useState<string | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const startTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const recognitionRef = useRef<any>(null)
   const latestTranscriptRef = useRef("")
+
+  // Microphone permission query
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.permissions) return
+    navigator.permissions.query({ name: "microphone" as PermissionName }).then((status) => {
+      setMicPermission(status.state)
+      status.onchange = () => {
+        setMicPermission(status.state)
+      }
+    }).catch(err => {
+      console.warn("Permissions API not supported:", err)
+    })
+  }, [])
 
   // 1. Real-time Firestore session listener
   useEffect(() => {
@@ -59,8 +73,8 @@ export default function PracticeSessionPage() {
         setMessages(newMessages)
 
         // Default mute configuration depending on channel
-        // For phone, auto-unmute. For others, default muted.
-        if (data?.channel === "phone") {
+        // For phone & face-to-face, auto-unmute voice synthesis by default
+        if (data?.channel === "phone" || data?.channel === "face_to_face") {
           setIsMuted(false)
         } else {
           setIsMuted(true)
@@ -84,9 +98,9 @@ export default function PracticeSessionPage() {
     return () => unsubscribe()
   }, [sessionId, router])
 
-  // 2. Call Timer for Phone Channel
+  // 2. Call Timer for Phone/Face-to-Face Channels
   useEffect(() => {
-    if (!session || session.channel !== "phone" || session.status !== "active") return
+    if (!session || (session.channel !== "phone" && session.channel !== "face_to_face") || session.status !== "active") return
     const interval = setInterval(() => {
       setCallDuration(prev => prev + 1)
     }, 1000)
@@ -134,17 +148,33 @@ export default function PracticeSessionPage() {
     const voices = window.speechSynthesis.getVoices()
     const englishVoices = voices.filter(v => v.lang.startsWith("en"))
     
+    // Prioritize natural online voices (like Microsoft Natural/Online or Google Online)
+    const onlineEnglishVoices = englishVoices.filter(v => 
+      v.name.toLowerCase().includes("online") || v.name.toLowerCase().includes("natural") || v.name.toLowerCase().includes("premium")
+    )
+    
     let selectedVoice = null
+    const femaleKeywords = ["female", "zira", "hazel", "susan", "samantha", "karen", "moira", "tessa", "veena", "fiona", "heera", "daria", "luna", "aurelie", "charlotte", "elsa", "joana", "sara", "yalda", "zuri", "aria", "jenny", "sally", "en-us-neural", "en-gb-neural"]
+    const maleKeywords = ["male", "david", "george", "ravi", "mark", "richard", "thomas", "oliver", "daniel", "james", "william", "alex", "guy", "en-us-neural", "en-gb-neural"]
+
     if (gender === "female") {
-      const femaleKeywords = ["female", "zira", "hazel", "susan", "samantha", "karen", "moira", "tessa", "veena", "fiona", "heera", "daria", "luna", "aurelie", "charlotte", "elsa", "joana", "sara", "yalda", "zuri"]
-      selectedVoice = englishVoices.find(v => 
+      selectedVoice = onlineEnglishVoices.find(v => 
         femaleKeywords.some(kw => v.name.toLowerCase().includes(kw))
       )
+      if (!selectedVoice) {
+        selectedVoice = englishVoices.find(v => 
+          femaleKeywords.some(kw => v.name.toLowerCase().includes(kw))
+        )
+      }
     } else {
-      const maleKeywords = ["male", "david", "george", "ravi", "mark", "richard", "thomas", "oliver", "daniel", "james", "william", "alex"]
-      selectedVoice = englishVoices.find(v => 
+      selectedVoice = onlineEnglishVoices.find(v => 
         maleKeywords.some(kw => v.name.toLowerCase().includes(kw))
       )
+      if (!selectedVoice) {
+        selectedVoice = englishVoices.find(v => 
+          maleKeywords.some(kw => v.name.toLowerCase().includes(kw))
+        )
+      }
     }
 
     if (selectedVoice) {
@@ -152,6 +182,10 @@ export default function PracticeSessionPage() {
     } else if (englishVoices.length > 0) {
       utterance.voice = englishVoices[0]
     }
+
+    // Adjust rate and pitch slightly to make the cadence sound more conversational
+    utterance.rate = 0.95
+    utterance.pitch = 1.0
 
     window.speechSynthesis.speak(utterance)
   }, [session])
@@ -206,10 +240,6 @@ export default function PracticeSessionPage() {
 
       if (!res.ok) {
         const data = await res.json()
-        if (data.error === "limit_reached") {
-          router.push(data.upgradeUrl || "/dashboard/billing")
-          return
-        }
         throw new Error(data.error || "Failed to send message")
       }
     } catch (err: any) {
@@ -314,10 +344,6 @@ export default function PracticeSessionPage() {
 
       if (!res.ok) {
         const data = await res.json()
-        if (data.error === "limit_reached") {
-          router.push(data.upgradeUrl || "/dashboard/billing")
-          return
-        }
         throw new Error(data.error || "Failed to start conversation")
       }
     } catch (err: any) {
@@ -409,6 +435,16 @@ export default function PracticeSessionPage() {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
   }
 
+  // Calculate dynamic client mood based on rolling metrics
+  const getClientMood = () => {
+    if (!session || !session.scores) return "Attentive"
+    const { overall = 50, trust = 50, discovery = 50 } = session.scores
+    const avg = (overall + trust + discovery) / 3
+    if (avg >= 70) return "Warm & Receptive 🟢"
+    if (avg < 45) return "Skeptical & Reserved 🔴"
+    return "Professional & Attentive 🟡"
+  }
+
   // Dial / Immersive Voice Call Layout
   if (channel === "phone") {
     return (
@@ -451,12 +487,9 @@ export default function PracticeSessionPage() {
               
               {/* Pulsating Avatar */}
               <div className="relative">
-                {/* Outermost ring */}
                 <div className={`absolute inset-0 rounded-full bg-blue-500/10 border border-blue-500/20 scale-150 ${apiPending || isListening ? "animate-pulse" : ""}`}></div>
-                {/* Middle ring */}
                 <div className={`absolute inset-0 rounded-full bg-[#00D68F]/5 border border-[#00D68F]/15 scale-125 ${apiPending ? "animate-ping" : ""}`}></div>
                 
-                {/* Avatar container */}
                 <div className="w-32 h-32 rounded-full bg-gradient-to-br from-[#1C1C35] to-[#121225] border-2 border-[#00D68F]/30 flex items-center justify-center font-display font-black text-4xl text-[#00D68F] shadow-2xl relative z-10">
                   {session.personaName.split(" ").map((n: string) => n[0]).join("")}
                 </div>
@@ -488,9 +521,7 @@ export default function PracticeSessionPage() {
                     ? "Generating voice response..." 
                     : isListening 
                     ? (userMessage || "Speak your response...") 
-                    : messages.length > 0 
-                    ? `"${messages[messages.length - 1].content}"` 
-                    : "Waiting for conversation to start..."
+                    : "Audio Active. Listen to the buyer and speak."
                   }
                 </p>
               </div>
@@ -567,6 +598,13 @@ export default function PracticeSessionPage() {
 
             </div>
 
+            {/* Mic Permission Alert */}
+            {micPermission === "denied" && (
+              <div className="mt-4 px-4 py-2 bg-red-950/40 border border-red-500/30 rounded-lg text-xs text-red-200 text-center animate-pulse">
+                ⚠️ Microphone access is blocked. Click the camera/microphone icon in your browser's search bar (or the lock icon) to allow access.
+              </div>
+            )}
+
             {/* Subtext display or input box for corrections */}
             <div className="w-full max-w-lg mt-6">
               <form onSubmit={handleSendMessage} className="flex items-center space-x-2 bg-gray-950/40 p-2.5 rounded-xl border border-gray-900">
@@ -628,7 +666,218 @@ export default function PracticeSessionPage() {
     )
   }
 
-  // Default layout (WhatsApp, Email, Face-to-Face)
+  // Immersive Boardroom / Face-to-Face layout
+  if (channel === "face_to_face") {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col bg-[#05050B] font-body text-[#F2F2F7]">
+        {/* Boardroom Header */}
+        <header className="h-16 border-b border-gray-900 bg-[#080814]/50 backdrop-blur-md flex items-center justify-between px-6 shrink-0 z-10">
+          <div className="flex items-center space-x-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+            <span>🤝 In-Person Meeting</span>
+          </div>
+          <div className="flex items-center space-x-4">
+            <button
+              onClick={() => setShowTranscript(!showTranscript)}
+              className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-all ${
+                showTranscript
+                  ? "bg-[#00D68F] text-[#080810] border-[#00D68F]"
+                  : "bg-gray-900 border-gray-800 text-gray-300 hover:text-white"
+              }`}
+            >
+              {showTranscript ? "Hide Meeting Minutes" : "Show Meeting Minutes"}
+            </button>
+            <button
+              onClick={handleEndSession}
+              disabled={ending}
+              className="px-4 py-2 rounded-lg bg-red-950/40 hover:bg-red-950/80 border border-red-500/30 text-red-200 text-xs font-bold transition-all"
+            >
+              {ending ? "Ending..." : "End Meeting"}
+            </button>
+          </div>
+        </header>
+
+        {/* Boardroom Main Body */}
+        <div className="flex-1 flex relative overflow-hidden bg-gradient-to-b from-[#080814] via-[#05050B] to-[#030307]">
+          
+          {/* Main Visual Boardroom Area */}
+          <div className={`flex-1 flex flex-col items-center justify-between p-8 transition-all duration-300 ${showTranscript ? "lg:mr-[380px]" : ""}`}>
+            
+            {/* Top Area: Meeting Room Context */}
+            <div className="w-full max-w-2xl flex items-center justify-between text-xs text-gray-500 uppercase tracking-widest border-b border-gray-900 pb-3">
+              <span>Location: Executive Boardroom</span>
+              <span className="font-mono">{formatDuration(callDuration)} elapsed</span>
+            </div>
+
+            {/* Center Area: Corporate Portrait Card */}
+            <div className="flex flex-col items-center justify-center space-y-6 max-w-xl w-full">
+              
+              {/* Glassmorphic Persona Card */}
+              <div className="w-full bg-[#121225]/40 border border-gray-850/60 rounded-3xl p-6 shadow-2xl backdrop-blur-md flex flex-col items-center text-center space-y-4">
+                
+                {/* Avatar */}
+                <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-pink-500/10 to-purple-500/10 border border-purple-500/20 flex items-center justify-center font-display font-black text-3xl text-[#00D68F] shadow-lg">
+                  {session.personaName.split(" ").map((n: string) => n[0]).join("")}
+                </div>
+
+                {/* Meta details */}
+                <div className="space-y-1">
+                  <h2 className="text-xl font-display font-bold text-white leading-none">{session.personaName}</h2>
+                  <p className="text-[10px] text-gray-500 uppercase font-semibold tracking-wider">Prospective Real Estate Buyer</p>
+                </div>
+
+                {/* Mood Badge & Status Indicators */}
+                <div className="flex items-center space-x-2">
+                  <span className="text-[11px] font-bold bg-gray-950/60 px-3 py-1 border border-gray-900 rounded-full text-gray-400">
+                    Difficulty: {session.difficulty}
+                  </span>
+                  <span className="text-[11px] font-bold bg-gray-950/60 px-3 py-1 border border-gray-900 rounded-full text-gray-300">
+                    Client Mood: <span className="font-extrabold">{getClientMood()}</span>
+                  </span>
+                </div>
+
+              </div>
+
+              {/* Dialogue Subtitle Bubble */}
+              <div className="w-full relative">
+                {/* Visual quote indicator */}
+                <span className="absolute -top-3 left-4 text-4xl text-[#00D68F]/20 font-serif">“</span>
+                <div className="bg-[#1C1C35]/50 border border-gray-800/40 rounded-2xl p-5 shadow-lg backdrop-blur-sm">
+                  <p className="text-sm text-gray-200 leading-relaxed text-center">
+                    {apiPending 
+                      ? <span className="text-gray-500 italic animate-pulse">Thinking...</span> 
+                      : messages.length > 0 
+                      ? messages[messages.length - 1].content 
+                      : "Meeting started. The client is waiting for you to introduce yourself."
+                    }
+                  </p>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Bottom Area: Controls & Text Input */}
+            <div className="w-full max-w-2xl flex flex-col items-center space-y-4">
+              
+              {/* Voice waves */}
+              <div className="h-6 flex items-center space-x-1">
+                {[...Array(8)].map((_, i) => {
+                  let barClass = "h-1"
+                  if (apiPending) barClass = i % 2 === 0 ? "h-4 animate-pulse" : "h-2 animate-pulse"
+                  else if (isListening) barClass = "h-5 animate-bounce"
+                  return (
+                    <div key={i} className={`w-0.8 rounded-full bg-[#00D68F] transition-all duration-300 ${barClass}`} style={{ animationDelay: `${i * 120}ms` }}></div>
+                  )
+                })}
+              </div>
+
+              {/* Speech & Form Controls */}
+              <form onSubmit={handleSendMessage} className="w-full flex items-center space-x-2 bg-[#121225]/60 border border-gray-850/60 p-3 rounded-2xl shadow-xl backdrop-blur-md">
+                
+                {/* Voice button */}
+                <button
+                  type="button"
+                  onClick={isListening ? stopListening : startListening}
+                  className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all border shrink-0 ${
+                    isListening
+                      ? "bg-red-500/20 border-red-500 text-red-500 animate-pulse"
+                      : "bg-[#00D68F]/10 border-[#00D68F]/20 text-[#00D68F] hover:bg-[#00D68F]/20"
+                  }`}
+                  title={isListening ? "Stop listening" : "Speak to Client"}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                  </svg>
+                </button>
+
+                {/* Speaker button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newMute = !isMuted
+                    setIsMuted(newMute)
+                    if (newMute) stopSpeaking()
+                  }}
+                  className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all border shrink-0 ${
+                    isMuted
+                      ? "bg-rose-950/20 border-rose-500/30 text-rose-400"
+                      : "bg-emerald-950/20 border-emerald-500/30 text-emerald-400"
+                  }`}
+                  title={isMuted ? "Unmute voice" : "Mute voice"}
+                >
+                  {isMuted ? "🔇" : "🔊"}
+                </button>
+
+                {/* Input Text Box */}
+                <input
+                  type="text"
+                  required
+                  value={userMessage}
+                  onChange={(e) => setUserMessage(e.target.value)}
+                  placeholder={isListening ? "Speaking... pauses automatically submit" : "Review spoken text or type directly..."}
+                  className="flex-1 bg-transparent px-3 text-sm focus:outline-none text-gray-200 placeholder-gray-600"
+                />
+
+                {/* Send Button */}
+                <button
+                  type="submit"
+                  disabled={loading || !userMessage.trim()}
+                  className="w-12 h-12 rounded-xl bg-[#00D68F] hover:bg-[#00b378] text-[#080810] flex items-center justify-center transition-all disabled:opacity-50 shrink-0"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                  </svg>
+                </button>
+
+              </form>
+
+              {/* Mic Permission Alert */}
+              {micPermission === "denied" && (
+                <div className="w-full px-4 py-2 bg-red-950/30 border border-red-500/20 rounded-xl text-center text-[11px] text-red-200">
+                  ⚠️ Mic Blocked: Click camera/microphone icon in the search bar to allow meeting speech.
+                </div>
+              )}
+
+            </div>
+
+          </div>
+
+          {/* Right Side Transcript Drawer (Meeting Minutes style) */}
+          {showTranscript && (
+            <div className="absolute right-0 top-0 bottom-0 w-full lg:w-[380px] bg-[#0c0c16] border-l border-gray-900 flex flex-col z-20 shadow-2xl animate-slideLeft">
+              <div className="p-4 border-b border-gray-900 flex items-center justify-between">
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider">Meeting Minutes</h3>
+                <button onClick={() => setShowTranscript(false)} className="text-gray-500 hover:text-white text-sm">✕</button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-5 space-y-6">
+                {messages.map((m, index) => {
+                  const isCustomer = m.role === "customer"
+                  return (
+                    <div key={index} className="border-b border-gray-900/60 pb-3 last:border-0">
+                      <div className="flex items-center space-x-2 text-[9px] font-bold tracking-wider mb-1">
+                        <span className={isCustomer ? "text-[#00D68F]" : "text-blue-400"}>
+                          {isCustomer ? session.personaName.toUpperCase() : "YOU (SALESPERSON)"}
+                        </span>
+                        <span className="text-gray-600">•</span>
+                        <span className="text-gray-500 font-mono">
+                          {m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ""}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-300 leading-relaxed pl-1">
+                        {m.content}
+                      </p>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+        </div>
+      </div>
+    )
+  }
+
+  // Default layout (WhatsApp, Email)
   let containerBg = "bg-[#080810]"
   let chatAreaBg = "bg-[#0c0c16]/50"
   let bubbleCustomer = "bg-[#1C1C35] text-[#F2F2F7] rounded-2xl rounded-tl-none border border-gray-800/40"
