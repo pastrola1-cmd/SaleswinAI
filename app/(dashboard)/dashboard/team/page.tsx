@@ -2,6 +2,7 @@ import { adminAuth, adminDb } from "@/utils/firebase/admin"
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import TeamOverviewClient from "./TeamOverviewClient"
+import PaywallGate from "@/components/paywall-gate"
 
 export default async function TeamOverviewPage() {
   const session = cookies().get("session")?.value
@@ -98,11 +99,13 @@ export default async function TeamOverviewPage() {
         </p>
       </div>
 
-      <TeamOverviewClient
-        profiles={profiles}
-        progressRecords={progressRecords}
-        weeklySessionsCount={weeklySessionsCount}
-      />
+      <PaywallGate requiredPlan="starter" featureName="Team Overview">
+        <TeamOverviewClient
+          profiles={profiles}
+          progressRecords={progressRecords}
+          weeklySessionsCount={weeklySessionsCount}
+        />
+      </PaywallGate>
     </div>
   )
 }

@@ -20,6 +20,10 @@ interface Company {
   name: string
   logo_url: string | null
   website_url: string | null
+  plan?: string
+  planStatus?: string
+  paystackSubscriptionCode?: string
+  paystackCustomerCode?: string
 }
 
 interface ProfileContextType {

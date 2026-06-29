@@ -44,6 +44,40 @@ export async function POST(request: Request) {
     const sessionData = sessionDoc.data()!
     const { companyId, personaKey, personaName, channel, difficulty, messages = [], messageCount = 0 } = sessionData
 
+    // Enforce monthly simulation limits (limit = 3 simulations per month on free plan)
+    if (userMessage === "__START__") {
+      const companyRef = adminDb.collection("companies").doc(companyId)
+      const companyDoc = await companyRef.get()
+      const companyPlan = companyDoc.exists ? (companyDoc.data()?.plan || "free").toLowerCase() : "free"
+
+      if (companyPlan === "free") {
+        const startOfMonth = new Date()
+        startOfMonth.setDate(1)
+        startOfMonth.setHours(0,0,0,0)
+
+        const userSimsSnap = await adminDb
+          .collection("simulation_sessions")
+          .where("userId", "==", uid)
+          .get()
+
+        const monthlySimsCount = userSimsSnap.docs.filter((d) => {
+          const data = d.data()
+          const crAt = data.createdAt || data.startedAt || data.completedAt
+          if (!crAt) return false
+          const sMs = crAt.toMillis ? crAt.toMillis() : new Date(crAt).getTime()
+          return sMs >= startOfMonth.getTime()
+        }).length
+
+        if (monthlySimsCount >= 3) {
+          return NextResponse.json({
+            error: "limit_reached",
+            message: "Simulation limit reached. The Free plan is limited to 3 simulations per month.",
+            upgradeUrl: "/dashboard/billing"
+          }, { status: 403 })
+        }
+      }
+    }
+
     // 2. Query company brain context
     const brainSnapshot = await adminDb
       .collection("company_brain")

@@ -4,7 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useProfile } from "@/hooks/useProfile"
 import { db } from "@/utils/firebase/client"
-import { collection, addDoc } from "firebase/firestore"
+import { collection, addDoc, query, where, getDocs } from "firebase/firestore"
 
 interface Persona {
   key: string
@@ -86,6 +86,34 @@ export default function PracticeSetupPage() {
   const handleStartSimulation = async () => {
     if (!profile?.id || !company?.id) return
     setLoading(true)
+
+    // Enforce monthly simulation limits (limit = 3 simulations per month on free plan)
+    if ((company?.plan || "free").toLowerCase() === "free") {
+      try {
+        const startOfMonth = new Date()
+        startOfMonth.setDate(1)
+        startOfMonth.setHours(0,0,0,0)
+
+        const userSimsSnap = await getDocs(
+          query(collection(db, "simulation_sessions"), where("userId", "==", profile.id))
+        )
+        
+        const monthlySimsCount = userSimsSnap.docs.filter((d) => {
+          const data = d.data()
+          const crAt = data.createdAt || data.startedAt
+          if (!crAt) return false
+          const sMs = crAt.toMillis ? crAt.toMillis() : new Date(crAt).getTime()
+          return sMs >= startOfMonth.getTime()
+        }).length
+
+        if (monthlySimsCount >= 3) {
+          router.push("/dashboard/billing?error=limit_reached")
+          return
+        }
+      } catch (err) {
+        console.error("Failed to check simulation limits:", err)
+      }
+    }
 
     const persona = PERSONAS.find(p => p.key === selectedPersona)!
 

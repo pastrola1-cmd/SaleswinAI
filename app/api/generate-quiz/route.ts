@@ -153,6 +153,38 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing parameters" }, { status: 400 })
     }
 
+    // Check company plan and enforce quiz limits (limit = 5 quizzes per month on free plan)
+    const companyRef = adminDb.collection("companies").doc(companyId)
+    const companyDoc = await companyRef.get()
+    const companyPlan = companyDoc.exists ? (companyDoc.data()?.plan || "free").toLowerCase() : "free"
+
+    if (companyPlan === "free") {
+      const startOfMonth = new Date()
+      startOfMonth.setDate(1)
+      startOfMonth.setHours(0,0,0,0)
+
+      const userQuizzesSnap = await adminDb
+        .collection("quiz_sessions")
+        .where("userId", "==", uid)
+        .get()
+
+      const monthlyQuizzesCount = userQuizzesSnap.docs.filter((d) => {
+        const data = d.data()
+        const compAt = data.completedAt || data.createdAt
+        if (!compAt) return false
+        const sMs = compAt.toMillis ? compAt.toMillis() : new Date(compAt).getTime()
+        return sMs >= startOfMonth.getTime()
+      }).length
+
+      if (monthlyQuizzesCount >= 5) {
+        return NextResponse.json({
+          error: "limit_reached",
+          message: "Quiz limit reached. The Free plan is limited to 5 quizzes per month.",
+          upgradeUrl: "/dashboard/billing"
+        }, { status: 403 })
+      }
+    }
+
     // 1. Query company brain facts
     let queryRef = adminDb.collection("company_brain").where("company_id", "==", companyId)
     if (category !== "all") {

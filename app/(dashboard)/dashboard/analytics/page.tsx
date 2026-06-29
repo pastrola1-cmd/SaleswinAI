@@ -2,6 +2,7 @@ import { adminAuth, adminDb } from "@/utils/firebase/admin"
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import AnalyticsClient from "./AnalyticsClient"
+import PaywallGate from "@/components/paywall-gate"
 
 export default async function AnalyticsPage() {
   const session = cookies().get("session")?.value
@@ -137,13 +138,15 @@ export default async function AnalyticsPage() {
         </p>
       </div>
 
-      <AnalyticsClient
-        profiles={profiles}
-        progressRecords={progressRecords}
-        simulations={simulations}
-        objections={objections}
-        quizzes={quizzes}
-      />
+      <PaywallGate requiredPlan="starter" featureName="Team Analytics">
+        <AnalyticsClient
+          profiles={profiles}
+          progressRecords={progressRecords}
+          simulations={simulations}
+          objections={objections}
+          quizzes={quizzes}
+        />
+      </PaywallGate>
     </div>
   )
 }

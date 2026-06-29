@@ -56,6 +56,10 @@ export default function QuizStartPage() {
 
       const data = await res.json()
       if (!res.ok) {
+        if (data.error === "limit_reached") {
+          router.push(data.upgradeUrl || "/dashboard/billing")
+          return
+        }
         throw new Error(data.error || "Failed to generate training quiz")
       }
 
