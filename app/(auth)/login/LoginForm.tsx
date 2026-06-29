@@ -30,7 +30,8 @@ export default function LoginForm() {
       })
 
       if (!res.ok) {
-        throw new Error("Failed to establish server session")
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || "Failed to establish server session")
       }
 
       const redirectUrl = searchParams.get("redirect") || "/dashboard"

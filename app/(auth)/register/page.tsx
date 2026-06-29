@@ -55,7 +55,8 @@ export default function RegisterPage() {
       })
 
       if (!res.ok) {
-        throw new Error("Failed to establish server session")
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || "Failed to establish server session")
       }
 
       router.push("/dashboard/onboarding")
