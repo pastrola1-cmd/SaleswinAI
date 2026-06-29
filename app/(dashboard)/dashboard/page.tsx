@@ -2,6 +2,7 @@ import { adminAuth, adminDb } from "@/utils/firebase/admin"
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import HomeDashboardClient from "./HomeDashboardClient"
+import { checkStreak } from "@/lib/gamification"
 
 export default async function DashboardPage() {
   const session = cookies().get("session")?.value
@@ -24,6 +25,9 @@ export default async function DashboardPage() {
   if (!profile) {
     redirect("/login")
   }
+
+  // Check and update streak on dashboard load
+  await checkStreak(uid)
 
   // Fetch or auto-create user progress doc in Firestore
   const progressDocRef = adminDb.collection("user_progress").doc(uid)

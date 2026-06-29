@@ -1,4 +1,5 @@
 import { ProfileProvider } from "@/hooks/useProfile"
+import { ToastProvider } from "@/components/toast-provider"
 import DashboardShell from "./DashboardShell"
 
 export default function DashboardLayout({
@@ -8,7 +9,9 @@ export default function DashboardLayout({
 }) {
   return (
     <ProfileProvider>
-      <DashboardShell>{children}</DashboardShell>
+      <ToastProvider>
+        <DashboardShell>{children}</DashboardShell>
+      </ToastProvider>
     </ProfileProvider>
   )
 }
