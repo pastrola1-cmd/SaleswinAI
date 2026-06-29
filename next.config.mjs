@@ -2,12 +2,12 @@
 const nextConfig = {
   webpack: (config, { isServer }) => {
     if (isServer) {
-      config.externals.push('firebase-admin');
+      config.externals.push('jose', 'jwks-rsa', 'firebase-admin');
     }
     return config;
   },
   experimental: {
-    serverComponentsExternalPackages: ['firebase-admin']
+    serverComponentsExternalPackages: ['jose', 'jwks-rsa', 'firebase-admin']
   }
 };
 
