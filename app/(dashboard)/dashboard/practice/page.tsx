@@ -119,15 +119,23 @@ export default function PracticeSetupPage() {
         completedAt: null
       })
 
-      // Trigger the opening message asynchronously
-      fetch("/api/simulate-message", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: docRef.id,
-          userMessage: "__START__"
+      // Trigger the opening message — await it but navigate regardless
+      // (the session page has retry logic if __START__ fails)
+      try {
+        const startRes = await fetch("/api/simulate-message", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: docRef.id,
+            userMessage: "__START__"
+          })
         })
-      }).catch(err => console.error("Failed to start simulation conversation:", err))
+        if (!startRes.ok) {
+          console.error("__START__ returned non-OK:", startRes.status)
+        }
+      } catch (err) {
+        console.error("Failed to start simulation conversation:", err)
+      }
 
       router.push(`/dashboard/practice/${docRef.id}`)
     } catch (err) {

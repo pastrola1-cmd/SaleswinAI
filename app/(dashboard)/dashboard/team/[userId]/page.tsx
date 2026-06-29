@@ -76,44 +76,58 @@ export default async function RepProfilePage({ params }: { params: Params }) {
     objections_drilled: progressData?.objections_drilled || progressData?.objectionsDrilled || 0
   }
 
-  // 4. Fetch recent simulation sessions (limit 10)
+  // 4. Fetch recent simulation sessions (limit 20)
   const sessionsQuery = await adminDb
     .collection("simulation_sessions")
     .where("userId", "==", userId)
-    .limit(10)
+    .orderBy("completedAt", "desc")
+    .limit(20)
     .get()
 
   const sessions = sessionsQuery.docs.map((docSnap) => {
     const data = docSnap.data()
+    const compAt = data.completedAt || data.createdAt || ""
+    const dateStr = compAt.toDate ? compAt.toDate().toISOString() : new Date(compAt).toISOString()
     return {
       id: docSnap.id,
       scenarioName: data.scenarioName || data.scenario_name || "Lekki smart haven simulation",
-      createdAt: data.createdAt || data.created_at || "",
-      score: data.score !== undefined ? data.score : 0,
+      createdAt: dateStr,
+      score: data.scores?.overall !== undefined ? data.scores.overall : (data.score || 0),
       xpEarned: data.xpEarned || data.xp_earned || 0,
-      durationSeconds: data.durationSeconds || data.duration_seconds || 0
+      durationSeconds: data.durationSeconds || data.duration_seconds || 0,
+      outcome: data.outcome || "pending",
+      // Include components scores for sparklines
+      scores: data.scores || { discovery: 0, trust: 0, objection: 0, closing: 0 }
     }
   })
 
-  // Sort sessions by date descending
-  sessions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-
-  // 5. Fetch quiz sessions to compute weak areas (avg category score < 60)
+  // 5. Fetch quiz sessions (limit 7 for Knowledge Sparkline and to compute weak areas)
   const quizQuery = await adminDb
     .collection("quiz_sessions")
     .where("userId", "==", userId)
     .get()
 
+  // Sort quizzes in memory to avoid missing index queries
+  const sortedQuizzes = quizQuery.docs
+    .map((d) => {
+      const data = d.data()
+      return {
+        score: data.score || 0,
+        category: data.category || "general",
+        completedAt: data.completedAt || data.createdAt || ""
+      }
+    })
+    .filter((q) => q.completedAt !== "")
+    .sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime())
+
+  // Weak quiz categories
   const categoryScores: Record<string, { total: number; count: number }> = {}
-  quizQuery.docs.forEach((docSnap) => {
-    const data = docSnap.data()
-    const category = data.category || "general"
-    const score = data.score || 0
-    if (!categoryScores[category]) {
-      categoryScores[category] = { total: 0, count: 0 }
+  sortedQuizzes.forEach((q) => {
+    if (!categoryScores[q.category]) {
+      categoryScores[q.category] = { total: 0, count: 0 }
     }
-    categoryScores[category].total += score
-    categoryScores[category].count += 1
+    categoryScores[q.category].total += q.score
+    categoryScores[q.category].count += 1
   })
 
   const weakAreas = Object.entries(categoryScores)
@@ -123,6 +137,30 @@ export default async function RepProfilePage({ params }: { params: Params }) {
     }))
     .filter((area) => area.avgScore < 60)
 
+  // 6. Generate Sparkline datasets (limit 7 values, chronological order)
+  const completedSimsSorted = [...sessions]
+    .filter((s) => s.createdAt !== "")
+    .slice(0, 7)
+    .reverse()
+
+  const conversionSparkline = completedSimsSorted.map((s) => ({ value: s.score }))
+  const objectionSparkline = completedSimsSorted.map((s) => ({ value: s.scores?.objection || s.scores?.objection_handling || 0 }))
+  const closingSparkline = completedSimsSorted.map((s) => ({ value: s.scores?.closing || 0 }))
+  const confidenceSparkline = completedSimsSorted.map((s) => ({ value: s.scores?.trust || s.scores?.trust_building || 0 }))
+
+  const recentQuizzesSorted = sortedQuizzes.slice(0, 7).reverse()
+  const knowledgeSparkline = recentQuizzesSorted.map((q) => ({ value: q.score }))
+
+  // 7. Performance trend (last 8 sessions overall scores)
+  const trendData = [...sessions]
+    .filter((s) => s.createdAt !== "")
+    .slice(0, 8)
+    .reverse()
+    .map((s, idx) => ({
+      name: `Run ${idx + 1}`,
+      score: s.score
+    }))
+
   return (
     <div className="min-h-screen bg-[#080810] text-[#F2F2F7] p-8">
       <div className="max-w-6xl mx-auto space-y-8 font-body">
@@ -130,8 +168,8 @@ export default async function RepProfilePage({ params }: { params: Params }) {
         {/* Header */}
         <header className="flex justify-between items-center border-b border-gray-800/80 pb-6">
           <div>
-            <Link href="/dashboard/team-management" className="text-xs text-gray-500 hover:text-[#00D68F] font-semibold uppercase tracking-wider mb-2 inline-block">
-              &larr; Back to Team Settings
+            <Link href="/dashboard/team" className="text-xs text-gray-500 hover:text-[#00D68F] font-semibold uppercase tracking-wider mb-2 inline-block">
+              &larr; Back to Team Standings
             </Link>
             <h1 className="text-3xl font-display font-extrabold tracking-tight text-white">
               Representative <span className="text-[#00D68F]">Performance</span>
@@ -145,6 +183,14 @@ export default async function RepProfilePage({ params }: { params: Params }) {
           progress={progress}
           sessions={sessions}
           weakAreas={weakAreas}
+          sparklines={{
+            conversion: conversionSparkline,
+            objection: objectionSparkline,
+            closing: closingSparkline,
+            confidence: confidenceSparkline,
+            knowledge: knowledgeSparkline
+          }}
+          trendData={trendData}
         />
       </div>
     </div>

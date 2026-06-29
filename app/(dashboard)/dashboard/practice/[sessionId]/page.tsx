@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { db } from "@/utils/firebase/client"
 import { doc, onSnapshot } from "firebase/firestore"
@@ -19,13 +19,16 @@ export default function PracticeSessionPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [userMessage, setUserMessage] = useState("")
   const [loading, setLoading] = useState(false)
-  const [typing, setTyping] = useState(false)
+  const [apiPending, setApiPending] = useState(false)
+  const [chatError, setChatError] = useState<string | null>(null)
+  const [startFailed, setStartFailed] = useState(false)
   const [hint, setHint] = useState<string | null>(null)
   const [hintLoading, setHintLoading] = useState(false)
   const [hintError, setHintError] = useState<string | null>(null)
   const [ending, setEnding] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const startTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // 1. Real-time Firestore session listener
   useEffect(() => {
@@ -35,7 +38,14 @@ export default function PracticeSessionPage() {
       if (docSnap.exists()) {
         const data = docSnap.data()
         setSession(data)
-        setMessages(data?.messages || [])
+        const newMessages: Message[] = data?.messages || []
+        setMessages(newMessages)
+
+        // Once we receive messages, clear the start-failed state and pending indicator
+        if (newMessages.length > 0) {
+          setStartFailed(false)
+          setApiPending(false)
+        }
 
         // If completed already, redirect to debrief
         if (data?.status === "completed") {
@@ -49,19 +59,60 @@ export default function PracticeSessionPage() {
     return () => unsubscribe()
   }, [sessionId, router])
 
-  // 2. Scroll to bottom
+  // 2. Detect __START__ failure: if no messages arrive within 15s, show retry
+  useEffect(() => {
+    if (messages.length === 0 && session && session.status === "active") {
+      startTimerRef.current = setTimeout(() => {
+        setStartFailed(true)
+        setApiPending(false)
+      }, 15000)
+    } else {
+      if (startTimerRef.current) {
+        clearTimeout(startTimerRef.current)
+        startTimerRef.current = null
+      }
+    }
+
+    return () => {
+      if (startTimerRef.current) {
+        clearTimeout(startTimerRef.current)
+      }
+    }
+  }, [messages.length, session])
+
+  // 3. Scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages, typing])
+  }, [messages, apiPending])
 
-  // Trigger customer typing simulation on user message
-  useEffect(() => {
-    if (messages.length > 0 && messages[messages.length - 1].role === "salesperson") {
-      setTyping(true)
-    } else {
-      setTyping(false)
+  // Retry the __START__ call
+  const handleRetryStart = useCallback(async () => {
+    setStartFailed(false)
+    setChatError(null)
+    setApiPending(true)
+
+    try {
+      const res = await fetch("/api/simulate-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          userMessage: "__START__"
+        })
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || "Failed to start conversation")
+      }
+      // On success, Firestore listener will pick up the new message
+    } catch (err: any) {
+      console.error("Retry start failed:", err)
+      setChatError(err.message || "Failed to start conversation. Please try again.")
+      setApiPending(false)
+      setStartFailed(true)
     }
-  }, [messages])
+  }, [sessionId])
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -70,7 +121,9 @@ export default function PracticeSessionPage() {
     const messageText = userMessage
     setUserMessage("")
     setLoading(true)
-    setHint(null) // Clear hint on new message
+    setApiPending(true)
+    setChatError(null)
+    setHint(null)
     setHintError(null)
 
     try {
@@ -87,10 +140,13 @@ export default function PracticeSessionPage() {
         const data = await res.json()
         throw new Error(data.error || "Failed to send message")
       }
-    } catch (err) {
+      // On success, Firestore listener will set apiPending = false when messages update
+    } catch (err: any) {
       console.error("Failed to send message:", err)
+      setChatError(err.message || "Failed to send message. Please try again.")
       // Restore user message in case of error
       setUserMessage(messageText)
+      setApiPending(false)
     } finally {
       setLoading(false)
     }
@@ -219,11 +275,52 @@ export default function PracticeSessionPage() {
         </div>
       </header>
 
+      {/* Error Banner */}
+      {chatError && (
+        <div className="border-b border-red-500/30 bg-red-950/30 shrink-0 z-10">
+          <div className="max-w-4xl mx-auto px-6 py-3 flex items-center justify-between">
+            <div className="flex items-center space-x-2 text-sm text-red-200">
+              <span>⚠️</span>
+              <span>{chatError}</span>
+            </div>
+            <button
+              onClick={() => setChatError(null)}
+              className="text-red-300 hover:text-white text-xs font-bold px-2 py-1 rounded hover:bg-red-900/30 transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 2. Messages List */}
       <div className={`flex-1 overflow-y-auto p-6 space-y-6 ${chatAreaBg}`}>
-        {messages.length === 0 && !typing && (
+        {messages.length === 0 && !apiPending && (
           <div className="h-full flex flex-col items-center justify-center text-center space-y-4 max-w-md mx-auto">
             <span className="text-4xl animate-bounce">💬</span>
+            <h2 className="text-sm font-bold text-white">
+              {startFailed ? "Failed to start conversation" : "Starting conversation..."}
+            </h2>
+            <p className="text-xs text-gray-500 leading-relaxed">
+              {startFailed
+                ? "The customer didn't respond. This could be a temporary issue."
+                : "Waiting for the customer to open the conversation."
+              }
+            </p>
+            {startFailed && (
+              <button
+                onClick={handleRetryStart}
+                className="mt-2 px-6 py-2.5 rounded-lg bg-[#00D68F] hover:bg-[#00b378] text-[#080810] text-xs font-bold uppercase tracking-wider transition-all shadow-lg shadow-[#00D68F]/10"
+              >
+                🔄 Retry
+              </button>
+            )}
+          </div>
+        )}
+
+        {messages.length === 0 && apiPending && (
+          <div className="h-full flex flex-col items-center justify-center text-center space-y-4 max-w-md mx-auto">
+            <div className="w-8 h-8 border-4 border-t-[#00D68F] border-gray-800 rounded-full animate-spin"></div>
             <h2 className="text-sm font-bold text-white">Starting conversation...</h2>
             <p className="text-xs text-gray-500 leading-relaxed">
               Waiting for the customer to open the conversation.
@@ -270,8 +367,8 @@ export default function PracticeSessionPage() {
             )
           })}
 
-          {/* Typing Indicator */}
-          {typing && (
+          {/* Typing Indicator — driven by apiPending state */}
+          {apiPending && messages.length > 0 && (
             <div className="flex justify-start">
               <div className={`px-4 py-3 rounded-2xl rounded-tl-none flex items-center space-x-1.5 ${bubbleCustomer}`}>
                 <div className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }}></div>

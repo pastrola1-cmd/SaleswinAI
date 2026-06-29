@@ -80,7 +80,7 @@ ${messages.map((m: any) => `${m.role.toUpperCase()}: ${m.content}`).join("\n")}
 Provide a concise, 1-2 sentence hint/sales tip telling the salesperson exactly how they should handle the customer's last concern or what key value proposition they should pitch next. Keep it practical and coach-like.`
 
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -148,7 +148,7 @@ ${
     }
 
     const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
