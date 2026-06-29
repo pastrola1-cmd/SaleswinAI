@@ -159,7 +159,7 @@ export default function PracticeDebriefPage() {
           <div>
             <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider">AI Sales Coach Assessment</h2>
             <p className="text-sm text-gray-300 leading-relaxed italic mt-4">
-              "{session.aiDebrief || "Coaching summary is not generated."}"
+              &ldquo;{session.aiDebrief || "Coaching summary is not generated."}&rdquo;
             </p>
           </div>
           {session.coachingFocus && (
@@ -278,7 +278,7 @@ export default function PracticeDebriefPage() {
                   </span>
                   <span className="text-[10px] text-gray-500 font-bold">Message #{tp.messageIndex}</span>
                 </div>
-                <p className="italic text-gray-400">"{tp.quote}"</p>
+                <p className="italic text-gray-400">&ldquo;{tp.quote}&rdquo;</p>
                 <p className="text-gray-300 font-semibold">{tp.explanation}</p>
               </div>
             ))}
