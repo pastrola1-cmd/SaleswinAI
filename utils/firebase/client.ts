@@ -13,6 +13,13 @@ const firebaseConfig = {
 }
 
 // Initialize Firebase
+console.log("DEBUG Firebase config:", {
+  apiKeyLength: firebaseConfig.apiKey ? firebaseConfig.apiKey.length : 0,
+  apiKeyStart: firebaseConfig.apiKey ? firebaseConfig.apiKey.slice(0, 5) : "none",
+  projectId: firebaseConfig.projectId,
+  authDomain: firebaseConfig.authDomain,
+  appId: firebaseConfig.appId
+})
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp()
 
 export const auth = getAuth(app)
